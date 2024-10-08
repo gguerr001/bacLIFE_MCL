@@ -53,6 +53,7 @@ rule final:
             antismash = expand('intermediate_files/antismash/{genus}_{species}_{str}_{replicon}/{genus}_{species}_{str}_{replicon}.gbk', zip, genus = GENUS, species = SPECIES, str = STR, replicon = REPLICON),
             bigscape_setup = "intermediate_files/BiG-SCAPE/bigscape.py",
             bigscape = BIGSCAPE,
+            bigscape_mcl = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/mix_clustering_c0.70_MCL.tsv",
             binary_table_GCF = 'intermediate_files/BiG-SCAPE/big_scape_binary_table.txt',
             rename_matrix = 'MEGAMATRIX_renamed.txt',
             phylophlan = "intermediate_files/phylophlan/output_phylophlan/RAxML_bestTree.input_refined.tre"
@@ -305,27 +306,45 @@ rule bigscape_exe:
         shell:
             "python ./intermediate_files/BiG-SCAPE/bigscape.py -i {params.indir} -o {params.outdir} --pfam_dir intermediate_files/PFAM/ --mode glocal --mibig --cutoffs 0.3 0.7 --include_singletons --cores {params.threads} --mix; rm -r intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal; mv intermediate_files/BiG-SCAPE/bigscape_output/network_files/*hybrids_glocal intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal"
 
+
+
+
+rule bigscape_mcl:
+        input: 
+            bs_network = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/mix_c0.70.network"
+            
+        output:
+            bs_mcl_GCF = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/mix_clustering_c0.70_MCL.tsv"
+        params:
+            network_filtered = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/filtered_mix_c0.70.network",
+            bs_mcl_data = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/out_mcl_c0.70.mci",
+            bs_mcl_tab = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/out_mcl_c0.70.tab",
+            out_mcl = "out.out_mcl_c0.70.mci.I30",
+            relocated_out_mcl = "intermediate_files/BiG-SCAPE/bigscape_output/network_files/hybrids_glocal/mix/out.out_mcl_c0.70.mci.I30"
+        run:
+            shell("cut -f1,2,3 {input.bs_network} > {params.network_filtered}")
+            shell("sed -i '1d' {params.network_filtered}")
+            shell("mcxload -abc {params.network_filtered} --stream-mirror -o {params.bs_mcl_data} -write-tab {params.bs_mcl_tab}")
+            shell("mcl {params.bs_mcl_data} -I 3.0 -use-tab {params.bs_mcl_tab}")
+            shell("mv {params.out_mcl} {params.relocated_out_mcl}")
+            shell("Rscript src/mcl2BigScape.R {params.relocated_out_mcl} {output.bs_mcl_GCF}")
+
+
+
 rule extract_binary_table_GCF:
     input:
-        clustering = rules.bigscape_exe.output.clustering,
+        clustering = rules.bigscape_mcl.output.bs_mcl_GCF,
         network = rules.bigscape_exe.output.network,
         annotations = rules.bigscape_exe.output.annotations
     params:
-        output_code_I_network = "intermediate_files/BiG-SCAPE/mix_filtered.network",
-        output_code_I_annotations = 'intermediate_files/BiG-SCAPE/GCF_annotation.txt',
-        output_code_II = 'intermediate_files/BiG-SCAPE/abs_pres_table.csv',
         names = 'names_equivalence.txt'
     output:
-        filtered_network = "intermediate_files/BiG-SCAPE/mix_filtered.network",
         annotations = 'intermediate_files/BiG-SCAPE/annotation.txt',
-        merged_annotations = 'intermediate_files/BiG-SCAPE/GCF_annotation.txt',
-        abs_presence_list = 'intermediate_files/BiG-SCAPE/abs_pres_table.csv',
-        binary_matrix = 'intermediate_files/BiG-SCAPE/big_scape_binary_table.txt'
+        binary_matrix = 'intermediate_files/BiG-SCAPE/big_scape_binary_table.txt',
+        bgc_descriptions = 'intermediate_files/BiG-SCAPE/BGC_descriptions.txt'
     run:
-        shell("Rscript src/I-BIGSCAPE_revision.R {input.clustering} {input.network} {input.annotations} intermediate_files/BiG-SCAPE/mix_filtered.network intermediate_files/BiG-SCAPE/GCF_annotation.txt {output.annotations} {params.names}")
-        shell("python src/II_Absence_Presence.py intermediate_files/BiG-SCAPE/GCF_annotation.txt intermediate_files/BiG-SCAPE/abs_pres_table.csv ")
-        shell("Rscript src/III_Absence_Presence_GCF.R intermediate_files/BiG-SCAPE/abs_pres_table.csv {output.binary_matrix}")
-
+        
+        shell("Rscript src/Process_bigscape.R {input.clustering} {input.annotations} {output.annotations} {output.binary_matrix} {output.bgc_descriptions} {params.names}")
 
 
 rule rename_MEGAMATRIX:
